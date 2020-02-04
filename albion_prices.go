@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
@@ -14,16 +16,17 @@ import (
 	"google.golang.org/api/sheets/v4"
 )
 
-const pricesURL string = "https://www.albion-online-data.com/api/v2/stats/prices"
-
-const credentialsFile string = "credentials.json"
-const tokenFile string = "token.json"
+const credentialsFilePath string = "credentials.json"
+const tokenFilePath string = "token.json"
 const oauth2Scope string = "https://www.googleapis.com/auth/spreadsheets"
 
 const spreadsheetID string = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
 const sheetName string = "MarketData"
 
-type priceData struct {
+const pricesURL string = "https://www.albion-online-data.com/api/v2/stats/prices"
+const itemDataDumpFilePath string = "items.txt"
+
+type itemData struct {
 	prettyName string
 	name       string
 	sellMin    int
@@ -32,7 +35,7 @@ type priceData struct {
 
 // Retrieve a sheets service
 func getService() (*sheets.Service, error) {
-	b, err := ioutil.ReadFile(credentialsFile)
+	b, err := ioutil.ReadFile(credentialsFilePath)
 	if err != nil {
 		log.Fatalf("Unable to read credentials.json file: %v", err)
 	}
@@ -56,10 +59,10 @@ func getClient(config *oauth2.Config) *http.Client {
 	// The file token.json stores the user's access and refresh tokens, and is
 	// created automatically when the authorization flow completes for the first
 	// time.
-	tok, err := tokenFromFile(tokenFile)
+	tok, err := tokenFromFile(tokenFilePath)
 	if err != nil {
 		tok = getTokenFromWeb(config)
-		saveToken(tokenFile, tok)
+		saveToken(tokenFilePath, tok)
 	}
 	return config.Client(context.Background(), tok)
 }
@@ -105,6 +108,68 @@ func saveToken(path string, token *oauth2.Token) {
 	json.NewEncoder(f).Encode(token)
 }
 
+func getBasicItemData(itemDumpFile string) []itemData {
+	items := make([]itemData, 0)
+
+	f, err := os.Open(itemDumpFile)
+	if err != nil {
+		log.Fatalf("Couldn't open item dump file: %s", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+
+	for {
+		line := getItemDumpLine(scanner)
+		if len(line) == 0 { // EOF
+			break
+		}
+		if len(line) == 2 {
+			// item doesnt have a "pretty" name, skip it
+			continue
+		}
+
+		var item itemData
+		item.name = line[1]
+		item.prettyName = strings.Join(line[3:], " ")
+		items = append(items, item)
+	}
+
+	if len(items) <= 0 {
+		log.Fatalf("No items read from item dump file!")
+	}
+
+	return items
+}
+
+func getItemDumpLine(scanner *bufio.Scanner) []string {
+	words := make([]string, 0)
+
+	if !scanner.Scan() {
+		err := scanner.Err()
+		if err != nil {
+			log.Fatalf("Error reading item dump file: %s", err)
+		}
+		return words // EOF
+	}
+
+	line := scanner.Text()
+
+	linescanner := bufio.NewScanner(strings.NewReader(line))
+	linescanner.Split(bufio.ScanWords)
+	for linescanner.Scan() {
+		word := linescanner.Text()
+		words = append(words, word)
+	}
+
+	err := scanner.Err()
+	if err != nil {
+		log.Fatalf("Error reading item dump file's line: %s", err)
+	}
+
+	return words
+}
+
 /*func getRequestURL() string {
 
 }*/
@@ -115,10 +180,11 @@ func saveToken(path string, token *oauth2.Token) {
 }*/
 
 func main() {
-	srv, err := getService()
+	/*srv, err := getService()
 	if err != nil {
 		log.Fatalf("Cannot get service: %s", err)
-	}
+	}*/
 
+	getBasicItemData(itemDataDumpFilePath)
 	//pricesJson := getPrices()
 }
