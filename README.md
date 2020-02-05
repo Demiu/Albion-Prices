@@ -19,7 +19,7 @@ Albion Prices is a tool for importing prices for Albion Online video game provid
 3. Move credentials.json to this project's root directory
 4. Create a spitesheet in GoogleSheets where you'd wish for data to end up
 5. Get the spreadsheet ID, sheet name and sheet location to insert your data into. ([If you need help](https://developers.google.com/sheets/api/guides/concepts))
-6. Open albion_prices.go in your text editor of choice
+6. Open `albion_prices.go` in your text editor of choice
 7. In lines
 
    ```go
@@ -52,3 +52,18 @@ You can compile the program into an executable for easier use:
 ```shell
 go build albion_prices.go
 ```
+Note that if you do, any changes to `albion_prices.go` won't have any effect on the executable.
+
+The data generated into the sheet will be in a form of table, one item per row, one city per two columns. The number in an item's row and city's left column is the minimum sell price of said item in said city, the number in the city's right colum is the item's maximum buy price in said city. Zeroes or blank cells represent either no sell/buy orders or no data avaiable. First row contains the names of the cities, the first column contains the IDs of the items.
+
+Item IDs are avaiable in [Albion Online's binary data dump](https://github.com/broderickhyman/ao-bin-dumps/blob/master/formatted/items.txt)
+
+### Querying different or additional items
+
+Each line in `enchantableResources.txt`, `enchantableItems.txt` and `unenchantableItems.txt` contains data about which items to query for prices from Albion Online Data Project:
+
+* `unenchantableItems.txt` contains item IDs which will be queried as-is
+* `enchantableItems.txt` contains item IDs which will be queried as-is, and will also query enchant tiers for said items
+* `enchantableResources.txt` contains resources and materials will be queried as-is, and will also query enchant tiers for said resources or materials
+
+Enchantable items and resources are split because their enchantment tier is denoted differently in item IDs
