@@ -29,9 +29,11 @@ const pricesRequestItemsLenCap int = 200
 
 const defaultItemDataDumpFilePath string = "items.txt"
 const defaultEnchantableResourcesFilePath string = "enchantableResources.txt"
+const defaultEnchantableItemsFilePath string = "enchantableItems.txt"
 const defaultUnenenchantableItemsFilePath string = "unenchantableItems.txt"
 
 var enchResSuffixes = [3]string{"_LEVEL1@1", "_LEVEL2@2", "_LEVEL3@3"}
+var enchItemSuffixes = [3]string{"@1", "@2", "@3"}
 
 func findStringID(slice []string, key string) int {
 	for id := range slice {
@@ -122,6 +124,10 @@ func feedItemNames(out chan<- string) {
 	for _, name := range enchResNames {
 		out <- name
 	}
+	enchItemNames := genEnchantableItemNames(defaultEnchantableItemsFilePath)
+	for _, name := range enchItemNames {
+		out <- name
+	}
 	unenchItemNames := getUnenchantableItemNames(defaultUnenenchantableItemsFilePath)
 	for _, name := range unenchItemNames {
 		out <- name
@@ -154,6 +160,32 @@ func genEnchantableResourceNames(enchantableResourcesFilePath string) []string {
 	}
 
 	return enchResNames
+}
+
+func genEnchantableItemNames(enchantableItemsFilePath string) []string {
+	var itemNames []string = make([]string, 0)
+
+	f, err := os.Open(enchantableItemsFilePath)
+	if err != nil {
+		log.Fatalf("Couldn't open enchantable items names file: %s", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		item := scanner.Text()
+		itemEnch1 := item + enchItemSuffixes[0]
+		itemEnch2 := item + enchItemSuffixes[1]
+		itemEnch3 := item + enchItemSuffixes[2]
+		itemNames = append(itemNames, item, itemEnch1, itemEnch2, itemEnch3)
+	}
+
+	err = scanner.Err()
+	if err != nil {
+		log.Fatalf("Error reading enchantable items names file: %s", err)
+	}
+
+	return itemNames
 }
 
 func getUnenchantableItemNames(unenchantableItemsFilePath string) []string {
