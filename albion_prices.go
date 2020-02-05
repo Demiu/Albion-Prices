@@ -20,17 +20,25 @@ const credentialsFilePath string = "credentials.json"
 const tokenFilePath string = "token.json"
 const oauth2Scope string = "https://www.googleapis.com/auth/spreadsheets"
 
-const spreadsheetID string = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
+const spreadsheetID string = ""
 const sheetName string = "MarketData"
 
 const pricesURL string = "https://www.albion-online-data.com/api/v2/stats/prices"
-const itemDataDumpFilePath string = "items.txt"
+const pricesRequestItemsLenCap int = 200
 
-type itemData struct {
-	prettyName string
-	name       string
-	sellMin    int
-	buyMax     int
+const defaultItemDataDumpFilePath string = "items.txt"
+const defaultEnchantableResourcesFilePath string = "enchantableResources.txt"
+const defaultUnenenchantableItemsFilePath string = "unenchantableItems.txt"
+
+var enchResSuffixes = [3]string{"_LEVEL1@1", "_LEVEL2@2", "_LEVEL3@3"}
+
+func findStringID(slice []string, key string) int {
+	for id := range slice {
+		if slice[id] == key {
+			return id
+		}
+	}
+	return -1
 }
 
 // Retrieve a sheets service
@@ -108,83 +116,190 @@ func saveToken(path string, token *oauth2.Token) {
 	json.NewEncoder(f).Encode(token)
 }
 
-func getBasicItemData(itemDumpFile string) []itemData {
-	items := make([]itemData, 0)
+func feedItemNames(out chan<- string) {
+	enchResNames := genEnchantableResourceNames(defaultEnchantableResourcesFilePath)
+	for _, name := range enchResNames {
+		out <- name
+	}
+	unenchItemNames := getUnenchantableItemNames(defaultUnenenchantableItemsFilePath)
+	for _, name := range unenchItemNames {
+		out <- name
+	}
 
-	f, err := os.Open(itemDumpFile)
+	close(out)
+}
+
+func genEnchantableResourceNames(enchantableResourcesFilePath string) []string {
+	var enchResNames []string = make([]string, 0)
+
+	f, err := os.Open(enchantableResourcesFilePath)
 	if err != nil {
-		log.Fatalf("Couldn't open item dump file: %s", err)
+		log.Fatalf("Couldn't open enchantable resource names file: %s", err)
 	}
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-
-	for {
-		line := getItemDumpLine(scanner)
-		if len(line) == 0 { // EOF
-			break
-		}
-		if len(line) == 2 {
-			// item doesnt have a "pretty" name, skip it
-			continue
-		}
-
-		var item itemData
-		item.name = line[1]
-		item.prettyName = strings.Join(line[3:], " ")
-		items = append(items, item)
+	for scanner.Scan() {
+		resource := scanner.Text()
+		resEnch1 := resource + enchResSuffixes[0]
+		resEnch2 := resource + enchResSuffixes[1]
+		resEnch3 := resource + enchResSuffixes[2]
+		enchResNames = append(enchResNames, resource, resEnch1, resEnch2, resEnch3)
 	}
 
-	if len(items) <= 0 {
-		log.Fatalf("No items read from item dump file!")
-	}
-
-	return items
-}
-
-func getItemDumpLine(scanner *bufio.Scanner) []string {
-	words := make([]string, 0)
-
-	if !scanner.Scan() {
-		err := scanner.Err()
-		if err != nil {
-			log.Fatalf("Error reading item dump file: %s", err)
-		}
-		return words // EOF
-	}
-
-	line := scanner.Text()
-
-	linescanner := bufio.NewScanner(strings.NewReader(line))
-	linescanner.Split(bufio.ScanWords)
-	for linescanner.Scan() {
-		word := linescanner.Text()
-		words = append(words, word)
-	}
-
-	err := scanner.Err()
+	err = scanner.Err()
 	if err != nil {
-		log.Fatalf("Error reading item dump file's line: %s", err)
+		log.Fatalf("Error reading enchantable resource names file: %s", err)
 	}
 
-	return words
+	return enchResNames
 }
 
-/*func getRequestURL() string {
+func getUnenchantableItemNames(unenchantableItemsFilePath string) []string {
+	var itemNames []string = make([]string, 0)
 
-}*/
+	f, err := os.Open(unenchantableItemsFilePath)
+	if err != nil {
+		log.Fatalf("Couldn't open unenchantable items names file: %s", err)
+	}
+	defer f.Close()
 
-/*func getPrices() {
-	requestURL = getRequestURL(pricesURL)
-	resp, err := http.Get()
-}*/
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		item := scanner.Text()
+		itemNames = append(itemNames, item)
+	}
+
+	err = scanner.Err()
+	if err != nil {
+		log.Fatalf("Error reading unenchantable items names file: %s", err)
+	}
+
+	return itemNames
+}
+
+func getPrices(items <-chan string, responses chan<- []byte) {
+	var itemsBatch []string = make([]string, 0)
+	var batchLen int = 0
+
+	for itm := range items {
+		if (batchLen + len(itm)) > pricesRequestItemsLenCap {
+			fmt.Printf("Requesting %s\n", strings.Join(itemsBatch, " "))
+			getPricesBatch(itemsBatch, responses)
+			itemsBatch = itemsBatch[:0]
+			batchLen = 0
+		}
+		itemsBatch = append(itemsBatch, itm)
+		batchLen += len(itm)
+	}
+
+	if batchLen != 0 {
+		getPricesBatch(itemsBatch, responses)
+	}
+	close(responses)
+}
+
+func getPricesBatch(batch []string, responses chan<- []byte) {
+	requestURL := getRequestURL(batch)
+
+	resp, err := http.Get(requestURL)
+	if err != nil {
+		log.Fatalf("HTTP GET %s failed:", requestURL, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("Reading HTTP GET %s's body failed:", requestURL, err)
+	}
+
+	responses <- body
+}
+
+func getRequestURL(items []string) string {
+	var b strings.Builder
+	b.WriteString(pricesURL)
+	b.WriteRune('/')
+
+	for _, itm := range items {
+		b.WriteString(itm)
+		b.WriteRune(',')
+	}
+
+	return b.String()
+}
+
+func genSheetValues(marketData <-chan []byte) sheets.ValueRange {
+	var vr sheets.ValueRange
+	var cities []string = make([]string, 0)
+	var itemToRow map[string]int = make(map[string]int)
+	var rowIter int = 1
+
+	// The city row
+	vr.Values = append(vr.Values, []interface{}{""})
+
+	for response := range marketData {
+		var itms []map[string]interface{}
+		json.Unmarshal(response, &itms)
+
+		for _, itm := range itms {
+			itemID := itm["item_id"].(string)
+			city := itm["city"].(string)
+			sellMin := int(itm["sell_price_min"].(float64))
+			buyMax := int(itm["buy_price_max"].(float64))
+
+			itemRowNum, ok := itemToRow[itemID]
+			if !ok {
+				itemToRow[itemID] = rowIter
+				itemRowNum = rowIter
+
+				newValueRow := []interface{}{itemID}
+				vr.Values = append(vr.Values, newValueRow)
+				rowIter++
+
+				if len(vr.Values) != rowIter {
+					panic("coding mistake in genSheetValues")
+				}
+			}
+
+			cityID := findStringID(cities, city)
+			if cityID == -1 {
+				// new city, extend cities and city row
+				cityID = len(cities)
+				cities = append(cities, city)
+				vr.Values[0] = append(vr.Values[0], city, city)
+			}
+			cityColumn := 1 + (cityID * 2) // each city takes 2 columns (sell min, buy max) and 1st column is empty
+
+			if extendColumns := (cityColumn + 2) - len(vr.Values[itemRowNum]); extendColumns > 0 {
+				// Item's row is too short, extend it
+				vr.Values[itemRowNum] = append(vr.Values[itemRowNum], make([]interface{}, extendColumns)...)
+			}
+
+			vr.Values[itemRowNum][cityColumn+0] = sellMin
+			vr.Values[itemRowNum][cityColumn+1] = buyMax
+		}
+	}
+
+	return vr
+}
+
+func getSheetRange() string {
+	return fmt.Sprintf("%s!A1", sheetName)
+}
 
 func main() {
-	/*srv, err := getService()
+	srv, err := getService()
 	if err != nil {
 		log.Fatalf("Cannot get service: %s", err)
-	}*/
+	}
 
-	getBasicItemData(itemDataDumpFilePath)
-	//pricesJson := getPrices()
+	itemCh := make(chan string, 32)
+	respCh := make(chan []byte, 16)
+	go feedItemNames(itemCh)
+	go getPrices(itemCh, respCh)
+
+	vr := genSheetValues(respCh)
+
+	srv.Spreadsheets.Values.Update(spreadsheetID, getSheetRange(), &vr).ValueInputOption("USER_ENTERED").Do()
 }
