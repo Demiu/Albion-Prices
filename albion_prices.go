@@ -22,6 +22,7 @@ const oauth2Scope string = "https://www.googleapis.com/auth/spreadsheets"
 
 const spreadsheetID string = ""
 const sheetName string = "MarketData"
+const sheetPosition string = "A1"
 
 const pricesURL string = "https://www.albion-online-data.com/api/v2/stats/prices"
 const pricesRequestItemsLenCap int = 200
@@ -107,7 +108,7 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 
 // Saves a token to a file path.
 func saveToken(path string, token *oauth2.Token) {
-	fmt.Printf("Saving credential file to: %s\n", path)
+	fmt.Printf("Saving oauth token file to: %s\n", path)
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		log.Fatalf("Unable to cache oauth token: %v", err)
@@ -285,7 +286,7 @@ func genSheetValues(marketData <-chan []byte) sheets.ValueRange {
 }
 
 func getSheetRange() string {
-	return fmt.Sprintf("%s!A1", sheetName)
+	return fmt.Sprintf("%s!%s", sheetName, sheetPosition)
 }
 
 func main() {
